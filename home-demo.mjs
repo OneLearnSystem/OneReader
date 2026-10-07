@@ -1,7 +1,8 @@
 // Isolated demonstration: these sample questions are deliberately not the live question bank.
 const bank=await fetch('demo-content.json').then(r=>r.json());
 const rewards=await fetch('rewards.json').then(r=>r.json());
-const key='onehome-trio-demo-v1';let d;try{d=JSON.parse(sessionStorage.getItem(key))}catch{}
+try{bank.push(...JSON.parse(sessionStorage.getItem('onehome-v4-demo-books')||'[]'))}catch{}
+const key='onehome-v4-demo';let d;try{d=JSON.parse(sessionStorage.getItem(key))}catch{}
 const now=()=>new Date().toISOString();
 if(!d){d={school:'Example Academy · Demonstration',settings:{ready:true,years:[7,8,9,10,11],board:'AQA',starReader:false,college:true,collegeOff:[]},classes:[{id:'demo-10',name:'10A · Maths & reading',year:10},{id:'demo-11',name:'11B · Maths & reading',year:11}],students:[{id:'demo-student',first:'Alex',last:'Taylor',year:11,class_ids:['demo-11'],last_seen:now()},{id:'demo-student2',first:'Maya',last:'Bennett',year:10,class_ids:['demo-10'],last_seen:null}],tasks:[],progress:[],awards:[{student_id:'demo-student',item:'demo-welcome-stars',service:'reader',points:100,created_at:now()},{student_id:'demo-student',item:'demo-welcome-power',service:'maths',points:70,created_at:now()}]};d.tasks.push({id:'demo-task',class_id:'demo-11',service:'maths',title:'A little algebra practice',items:[bank.find(c=>c.kind==='math').id],points:10,release_at:new Date(Date.now()-86400000).toISOString(),due_at:new Date(Date.now()+604800000).toISOString()})}
 d.wallet??={saved:{reader:20,maths:10},spent:{reader:0,maths:0},owned:[],equipped:{}};
@@ -9,13 +10,22 @@ const save=()=>sessionStorage.setItem(key,JSON.stringify(d));
 export async function demoCall(action,a={},mode='admin'){
  const pupil=d.students[0],student=mode==='student',isAdmin=mode==='admin';
  if(['settings','import','sync','rotate'].includes(action)&&!isAdmin)throw Error('School administrator access required.');
- if(['wallet','save_points','buy','equip','care'].includes(action)){
+ if(['wallet','save_points','buy','equip','care','buddy_name'].includes(action)){
   const w=d.wallet,earned=Object.fromEntries(['reader','maths'].map(s=>[s,d.awards.filter(v=>v.student_id===pupil.id&&v.service===s).reduce((n,v)=>n+v.points,0)]));
-  if(action==='care')w[a.kind]=now();
+  if(['buddy_name','care','equip'].includes(action)&&d.settings.buddy===false)throw Error('Study buddy is disabled by your school.');
+  if(action==='buddy_name'){if(!a.name?.trim()||a.name.length>24)throw Error('Use 1–24 characters.');w.name=a.name.trim()}
+  if(action==='care'&&Date.now()-new Date(w[a.kind]||0).getTime()>=86400000){if(earned.maths-w.spent.maths-w.saved.maths<5)throw Error('You need 5 available Power Points.');w.spent.maths+=5;w[a.kind]=now()}
+
   if(action==='save_points'){if(a.amount>earned[a.service]-w.spent[a.service]-w.saved[a.service]||-a.amount>w.saved[a.service])throw Error('Not enough available or saved points.');w.saved[a.service]+=a.amount}
   if(action==='buy'){const r=rewards.find(r=>r.id===a.reward);if(!w.owned.includes(r.id)){if(r.cost>earned[r.service]-w.spent[r.service]-w.saved[r.service])throw Error('Not enough available points.');w.spent[r.service]+=r.cost;w.owned.push(r.id)}}
-  if(action==='equip'){const r=rewards.find(r=>r.id===a.reward);if(!w.owned.includes(r.id))throw Error('Buy first.');w.equipped[r.category]=r.id}
+  if(action==='equip'){const r=rewards.find(r=>r.id===a.reward);if(!w.owned.includes(r.id))throw Error('Buy first.');w.equipped[r.category]=a.remove?null:r.id}
   save();return structuredClone({...w,earned})
+ }
+ if(action==='book_upload'){if(!isAdmin)throw Error('Administrator required.');const id='custom-'+crypto.randomUUID();bank.push({id,kind:'book',data:a.book});sessionStorage.setItem('onehome-v4-demo-books',JSON.stringify(bank.filter(b=>b.id.startsWith('custom-'))));return {id}}
+ if(['annual_open','annual_answer'].includes(action)){
+  const year=new Date().getFullYear()-(new Date().getMonth()<8?1:0),id='annual-'+year;let pr=d.progress.find(p=>p.id===id);if(!pr){const completed=d.progress.filter(p=>p.data.complete).map(p=>bank.find(b=>b.id===p.id&&b.kind==='book')).filter(Boolean);if(!completed.length)return {year,eligible:false,questions:[]};pr={id,student_id:pupil.id,data:{year,refs:completed.flatMap(b=>b.data.questions.map((q,i)=>({book:b.id,question:i}))).slice(0,10),answers:{},score:0,complete:false}};d.progress.push(pr)}
+  const v=pr.data;if(action==='annual_answer'&&!v.complete&&v.answers[a.question]===undefined){const ref=v.refs[a.question],q=bank.find(b=>b.id===ref.book).data.questions[ref.question];v.answers[a.question]=a.answer;if(q.correct===a.answer)v.score++;v.complete=Object.keys(v.answers).length===v.refs.length;if(v.complete&&!d.awards.some(a=>a.item===id))d.awards.push({student_id:pupil.id,item:id,service:'reader',points:v.score*2,created_at:now()})}
+  save();return {...v,eligible:true,points:v.complete?v.score*2:0,questions:v.refs.map(ref=>({...ref,title:bank.find(b=>b.id===ref.book).data.title,questionData:bank.find(b=>b.id===ref.book).data.questions[ref.question]}))}
  }
  if(action==='tick'||action==='status')return {saved:true};
  if(action==='email_roster'){if(!isAdmin)throw Error('Administrator required.');for(const row of a.rows){const s=d.students.find(s=>s.id===row.id);if(!s)throw Error('Student not found.');s.email=row.email;s.provider=row.provider}save();return {saved:true}}
@@ -36,7 +46,7 @@ export async function demoCall(action,a={},mode='admin'){
   if(c.data.college&&(!d.settings.college||d.settings.collegeOff.some(c=>pupil.class_ids.includes(c))))throw Error('College reading is disabled.');
   const id=c.kind==='math'?a.id+':'+(a.task||'revision'):a.id;
   let p=d.progress.find(p=>p.id===id&&p.student_id===pupil.id);if(!p){p={id,student_id:pupil.id,data:{}};d.progress.push(p)}
-  if(action==='hint'){if(a.tool==='pet'&&(!d.wallet.water||!d.wallet.fed))throw Error('Give Pip free food and water first.');if(a.tool!=='pet'&&!d.wallet.owned.includes('reward-21'))throw Error('Buy the hint tool first.');return {eliminate:(c.data.questions[a.question].correct+1)%4}}
+  if(action==='hint'){if(a.tool==='pet'&&(d.settings.buddy===false||!d.wallet.water||!d.wallet.fed))throw Error('Feed and water your study buddy first.');if(a.tool!=='pet'&&!d.wallet.owned.includes('reward-21'))throw Error('Buy the hint tool first.');return {eliminate:(c.data.questions[a.question].correct+1)%4}}
   if(action==='open'){save();return {id:a.id,content:{...c.data,pages:undefined,pagesCount:c.kind==='book'?c.data.pages.length:undefined,questions:c.data.questions.map(({correct,explanation,...q})=>q)},progress:structuredClone(p.data)}}
   if(action==='page'){if(a.page>(p.data.page||0)+1)throw Error('Read in order.');p.data.page=Math.max(p.data.page||0,a.page);save();return {text:c.data.pages[a.page],page:a.page,pages:c.data.pages.length}}
   if(action==='test_save'){if(!p.data.complete){p.data.answers={...p.data.answers,...a.answers};if(a.submit){if(Object.keys(p.data.answers).length!==50)throw Error('Answer all 50 questions.');p.data.score=c.data.questions.filter((q,i)=>q.correct===p.data.answers[i]).length;p.data.complete=true;p.data.level=p.data.score<20?'Supported':p.data.score<35?'Developing':'Confident'}}save();return p.data}
