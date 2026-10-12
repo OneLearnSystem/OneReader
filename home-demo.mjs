@@ -81,7 +81,7 @@ if(action==='task_batch'){for(const cls of a.classes)for(let i=0;i<a.weeks;i++)a
  else if(action==='archive')d.tasks=d.tasks.filter(t=>t.id!==a.id);
  else {
   const c=bank.find(c=>c.id===a.id);if(!c)throw Error('Content not found.');
-  if(c.kind==='book'&&!d.progress.find(p=>p.id==='reading-check')?.data.complete)throw Error('Complete your reading check first.');
+  // Demonstration books open immediately; live school checks are unchanged.
   if(c.data.college&&(!d.settings.college||d.settings.collegeOff.some(c=>pupil.class_ids.includes(c))))throw Error('College reading is disabled.');
   const id=c.kind==='math'?a.id+':'+(a.review?'recap':a.task||'revision'):a.id;
   let p=d.progress.find(p=>p.id===id&&p.student_id===pupil.id);if(!p){p={id,student_id:pupil.id,data:{}};d.progress.push(p)}
